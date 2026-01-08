@@ -1,19 +1,15 @@
-# ===== Node / Frontend =====
-frontend/node_modules/
-frontend/.next/
-frontend/dist/
-frontend/build/
+# ===== Python =====
+__pycache__/
+*.pyc
+.venv/
+.env
 
-# ===== Python / Backend =====
-backend/__pycache__/
-backend/.venv/
-backend/*.pyc
-backend/.env
-
-# ===== Infra / Docker =====
-infra/.env
+# ===== Node =====
+node_modules/
+.next/
+dist/
+build/
 
 # ===== Common =====
-.env
 .env.*
 .DS_Store
