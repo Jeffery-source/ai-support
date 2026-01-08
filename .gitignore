@@ -1,0 +1,19 @@
+# ===== Node / Frontend =====
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+frontend/build/
+
+# ===== Python / Backend =====
+backend/__pycache__/
+backend/.venv/
+backend/*.pyc
+backend/.env
+
+# ===== Infra / Docker =====
+infra/.env
+
+# ===== Common =====
+.env
+.env.*
+.DS_Store
