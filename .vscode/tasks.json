@@ -1,0 +1,82 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: dev",
+      "type": "shell",
+      "command": "cd backend && source .venv/Scripts/activate && python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "owner": "custom",
+          "pattern": [
+            {
+              "regexp": "^(.*):(\\d+):(\\d+):\\s+(.*)$",
+              "file": 1,
+              "line": 2,
+              "column": 3,
+              "message": 4
+            }
+          ],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "Uvicorn running on",
+            "endsPattern": "Application startup complete"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Frontend: dev",
+      "type": "shell",
+      "command": "cd frontend && npm run dev",
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "owner": "custom",
+          "pattern": [
+            {
+              "regexp": "^(.*):(\\d+):(\\d+):\\s+(.*)$",
+              "file": 1,
+              "line": 2,
+              "column": 3,
+              "message": 4
+            }
+          ],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "VITE v",
+            "endsPattern": "Local:\\s+http://localhost:5173/"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Browser: open frontend",
+      "type": "process",
+      "command": "cmd",
+      "args": ["/c", "start", "", "http://localhost:5173"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "never", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Browser: open swagger",
+      "type": "process",
+      "command": "cmd",
+      "args": ["/c", "start", "", "http://localhost:8000/docs"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "never", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Dev: start (backend + frontend + open tabs)",
+      "group": { "kind": "build", "isDefault": true },
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Backend: dev",
+        "Frontend: dev",
+        "Browser: open frontend",
+        "Browser: open swagger"
+      ]
+    }
+  ]
+}
