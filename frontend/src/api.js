@@ -1,7 +1,12 @@
-export async function apiFetch(url, options = {}) {
-  const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
+export async function apiFetch(path, { method = "GET", body } = {}) {
+  const token = localStorage.getItem("access_token");
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const resp = await fetch(`http://127.0.0.1:8000${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
   });
 
   const data = await resp.json();
