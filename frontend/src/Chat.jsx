@@ -25,6 +25,8 @@ export default function Chat({ onLogout }) {
 
   // React 18 StrictMode 开发环境双 mount：避免重复 init
   const didInitRef = useRef(false);
+  const chatScrollRef = useRef(null);
+  const typingTimerRef = useRef(null);
 
   // 防止旧请求覆盖新状态
   const historyReqSeq = useRef(0);
@@ -41,6 +43,21 @@ export default function Chat({ onLogout }) {
     setErrorText("");
     onLogout?.();
   }, [onLogout]);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [log]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) {
+        clearInterval(typingTimerRef.current);
+        typingTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const loadHistory = useCallback(
     async (sid) => {
@@ -150,8 +167,7 @@ export default function Chat({ onLogout }) {
   }, [loadSessions]);
 
   const handleSelectSession = useCallback(
-    async (e) => {
-      const sid = e.target.value;
+    async (sid) => {
 
       // 切会话：立刻清屏 + 取消发送状态
       setSessionId(sid);
@@ -215,7 +231,10 @@ export default function Chat({ onLogout }) {
       setErrorText("");
 
       // 先把用户消息乐观更新到 UI
-      setLog((prev) => [...prev, { role: "user", content }]);
+      setLog((prev) => [
+        ...prev,
+        { id: `u-${Date.now()}`, role: "user", content },
+      ]);
       setInput("");
 
       try {
@@ -232,16 +251,33 @@ export default function Chat({ onLogout }) {
         // 兼容两种返回：
         // A) { reply: "..." }
         // B) { role: "assistant", content: "..." }
-        const assistantMsg = res?.content
-          ? { role: res.role || "assistant", content: res.content }
-          : { role: "assistant", content: res?.reply ?? "" };
-
-        if (!assistantMsg.content) {
+        const assistantText = res?.content ?? res?.reply ?? "";
+        if (!assistantText) {
           setErrorText("Empty reply from server.");
           return;
         }
 
-        setLog((prev) => [...prev, assistantMsg]);
+        const msgId = `a-${Date.now()}`;
+        setLog((prev) => [...prev, { id: msgId, role: "assistant", content: "" }]);
+
+        if (typingTimerRef.current) {
+          clearInterval(typingTimerRef.current);
+          typingTimerRef.current = null;
+        }
+
+        let index = 0;
+        const step = 3;
+        typingTimerRef.current = setInterval(() => {
+          index = Math.min(index + step, assistantText.length);
+          const slice = assistantText.slice(0, index);
+          setLog((prev) =>
+            prev.map((m) => (m.id === msgId ? { ...m, content: slice } : m))
+          );
+          if (index >= assistantText.length) {
+            clearInterval(typingTimerRef.current);
+            typingTimerRef.current = null;
+          }
+        }, 24);
       } catch (err) {
         if (seq !== sendReqSeq.current) return;
 
@@ -257,7 +293,7 @@ export default function Chat({ onLogout }) {
         // 可选：失败时把消息标注一下（这里简单做，不回滚）
         setLog((prev) => [
           ...prev,
-          { role: "system", content: "⚠️ Message failed to send." },
+          { id: `s-${Date.now()}`, role: "system", content: "Message failed to send." },
         ]);
       } finally {
         if (seq === sendReqSeq.current) setSending(false);
@@ -283,88 +319,477 @@ export default function Chat({ onLogout }) {
   );
 
   return (
-    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
-      {/* 顶部：会话选择 */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <select
-          value={sessionId}
-          onChange={handleSelectSession}
-          disabled={loadingSessions || sessions.length === 0}
-          style={{ minWidth: 280 }}
-        >
-          <option value="" disabled>
-            {loadingSessions ? "Loading sessions..." : "Select a session"}
-          </option>
-          {sessions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.title ?? s.id}
-            </option>
-          ))}
-        </select>
+    <div className="chat-page">
+      <style>{`
+        @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
-        <button onClick={handleNewChat}>New Chat</button>
-        <button onClick={handleLogout}>Logout</button>
-      </div>
+        :root {
+          color-scheme: light;
+        }
 
-      {errorText ? (
-        <div style={{ marginTop: 10, color: "crimson" }}>{errorText}</div>
-      ) : null}
+        html,
+        body,
+        #root {
+          height: 100%;
+        }
 
-      {/* 聊天记录区 */}
-      <div
-        style={{
-          marginTop: 12,
-          border: "1px solid #ddd",
-          borderRadius: 10,
-          padding: 12,
-          height: 420,
-          overflowY: "auto",
-          background: "#1e1212",
-        }}
-      >
-        {loadingHistory ? <div>Loading history...</div> : null}
+        body {
+          margin: 0;
+          overflow: hidden;
+          font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        }
 
-        {!loadingHistory && !sessionId ? (
-          <div style={{ opacity: 0.7 }}>
-            No session selected. Create a new chat or pick one from the list.
-          </div>
-        ) : null}
+        .chat-page {
+          --ink: #0b1f2a;
+          --muted: #4d616f;
+          --paper: #f5f4ef;
+          --accent: #0d7c7b;
+          --accent-dark: #0f4f4f;
+          --stroke: rgba(15, 44, 58, 0.12);
+          --surface: rgba(255, 255, 255, 0.9);
+          width: 100vw;
+          height: 100vh;
+          overflow: hidden;
+          background:
+            radial-gradient(1100px 500px at 10% -20%, rgba(208, 177, 95, 0.25), transparent 60%),
+            radial-gradient(900px 400px at 100% 0%, rgba(13, 124, 123, 0.2), transparent 55%),
+            linear-gradient(130deg, #f0ede6 0%, #f7f9fb 55%, #eff3f7 100%);
+          color: var(--ink);
+        }
 
-        {log.map((m, i) => (
-          <div key={i} style={{ marginBottom: 10, whiteSpace: "pre-wrap" }}>
-            <b>{m.role}:</b> {m.content}
-          </div>
-        ))}
-      </div>
+        .chat-shell {
+          height: 100%;
+          display: grid;
+          grid-template-columns: 320px 1fr;
+          gap: 20px;
+          padding: 22px;
+          box-sizing: border-box;
+        }
 
-      {/* 输入框 */}
-      <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleInputKeyDown}
-          placeholder={
-            sessionId ? "Type a message..." : "Select a session first..."
+        .chat-sidebar {
+          background: var(--surface);
+          border: 1px solid var(--stroke);
+          border-radius: 26px;
+          padding: 22px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          box-shadow: 0 24px 50px rgba(15, 44, 58, 0.12);
+          backdrop-filter: blur(12px);
+          animation: slide-in 700ms ease-out;
+        }
+
+        .brand-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .brand-mark {
+          width: 40px;
+          height: 40px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, var(--accent), #0f3b3b);
+          color: #fff;
+          font-weight: 700;
+          display: grid;
+          place-items: center;
+          letter-spacing: 1px;
+        }
+
+        .brand-name {
+          font-weight: 700;
+        }
+
+        .brand-tag {
+          font-size: 12px;
+          color: var(--muted);
+        }
+
+        .primary-btn {
+          height: 44px;
+          border-radius: 14px;
+          border: none;
+          background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+          color: #fff;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: 0 14px 30px rgba(13, 124, 123, 0.25);
+          transition: transform 200ms ease, box-shadow 200ms ease;
+        }
+
+        .primary-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 18px 36px rgba(13, 124, 123, 0.28);
+        }
+
+        .sidebar-title {
+          font-size: 13px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--muted);
+          margin-top: 6px;
+        }
+
+        .session-list {
+          display: grid;
+          gap: 10px;
+          height: 420px;
+          overflow-y: auto;
+          padding-right: 4px;
+        }
+
+        .session-card {
+          border: 1px solid var(--stroke);
+          background: #fff;
+          border-radius: 16px;
+          padding: 12px 14px;
+          font-size: 14px;
+          text-align: left;
+          cursor: pointer;
+          transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+        }
+
+        .session-card.active {
+          border-color: rgba(13, 124, 123, 0.5);
+          box-shadow: 0 14px 30px rgba(13, 124, 123, 0.18);
+          transform: translateY(-1px);
+        }
+
+        .session-meta {
+          font-size: 12px;
+          color: var(--muted);
+          margin-top: 4px;
+        }
+
+        .ghost-btn {
+          height: 40px;
+          border-radius: 12px;
+          border: 1px solid var(--stroke);
+          background: transparent;
+          color: var(--muted);
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .chat-main {
+          background: var(--surface);
+          border: 1px solid var(--stroke);
+          border-radius: 28px;
+          padding: 18px 22px 22px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          height: calc(100vh - 44px);
+          overflow-y: auto;
+          box-shadow: 0 28px 60px rgba(15, 44, 58, 0.12);
+          backdrop-filter: blur(12px);
+          animation: fade-in 800ms ease-out;
+        }
+
+        .chat-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .session-select {
+          height: 40px;
+          border-radius: 12px;
+          border: 1px solid var(--stroke);
+          padding: 0 12px;
+          font-size: 14px;
+          min-width: 240px;
+          background: #fff;
+        }
+
+        .status-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(13, 124, 123, 0.1);
+          color: var(--accent);
+          padding: 8px 12px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: #1dbf8d;
+        }
+
+        .error-banner {
+          background: rgba(175, 40, 25, 0.12);
+          color: #aa2418;
+          border: 1px solid rgba(175, 40, 25, 0.2);
+          padding: 10px 12px;
+          border-radius: 12px;
+          font-size: 13px;
+        }
+
+        .chat-body {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+        }
+
+        .chat-scroll {
+          flex: 1;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          padding-right: 8px;
+        }
+
+        .empty-state {
+          color: var(--muted);
+          font-size: 14px;
+          margin-top: 40px;
+          text-align: center;
+        }
+
+        .message {
+          max-width: 72%;
+          padding: 12px 14px;
+          border-radius: 16px;
+          border: 1px solid var(--stroke);
+          background: #fff;
+          box-shadow: 0 10px 24px rgba(15, 44, 58, 0.08);
+          white-space: pre-wrap;
+          line-height: 1.45;
+          font-size: 14px;
+        }
+
+        .message.user {
+          align-self: flex-end;
+          background: linear-gradient(135deg, rgba(13, 124, 123, 0.12), rgba(13, 124, 123, 0.04));
+          border-color: rgba(13, 124, 123, 0.25);
+        }
+
+        .message.assistant {
+          align-self: flex-start;
+        }
+
+        .message.system {
+          align-self: center;
+          background: rgba(15, 44, 58, 0.08);
+          border-color: rgba(15, 44, 58, 0.12);
+          color: var(--muted);
+        }
+
+        .message-role {
+          font-size: 11px;
+          color: var(--muted);
+          margin-bottom: 6px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+        }
+
+        .composer {
+          display: flex;
+          gap: 12px;
+          align-items: flex-end;
+          margin-top: auto;
+        }
+
+        .composer textarea {
+          flex: 1;
+          min-height: 70px;
+          max-height: 160px;
+          resize: none;
+          padding: 12px 14px;
+          border-radius: 14px;
+          border: 1px solid var(--stroke);
+          font-size: 14px;
+          line-height: 1.5;
+          font-family: inherit;
+          background: #fff;
+        }
+
+        .composer textarea:focus {
+          outline: none;
+          border-color: rgba(13, 124, 123, 0.5);
+          box-shadow: 0 0 0 3px rgba(13, 124, 123, 0.15);
+        }
+
+        .send-btn {
+          min-width: 120px;
+          height: 44px;
+          border-radius: 14px;
+          border: none;
+          background: var(--accent);
+          color: #fff;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .send-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        @keyframes slide-in {
+          from { opacity: 0; transform: translateX(-20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(16px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 980px) {
+          .chat-shell {
+            grid-template-columns: 1fr;
+            padding: 18px;
           }
-          disabled={!sessionId || sending}
-          rows={3}
-          style={{
-            flex: 1,
-            resize: "none",
-            padding: 10,
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={handleSendClick}
-          disabled={!canSend}
-          style={{ width: 110 }}
-        >
-          {sending ? "Sending..." : "Send"}
-        </button>
+          .chat-sidebar {
+            order: 2;
+          }
+          .chat-main {
+            order: 1;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .chat-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .session-select {
+            width: 100%;
+          }
+          .message {
+            max-width: 100%;
+          }
+          .composer {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .send-btn {
+            width: 100%;
+          }
+        }
+      `}</style>
+
+      <div className="chat-shell">
+        <aside className="chat-sidebar">
+          <div className="brand-row">
+            <div className="brand-mark">A</div>
+            <div>
+              <div className="brand-name">Auralis</div>
+              <div className="brand-tag">AI Support Console</div>
+            </div>
+          </div>
+
+          <button className="primary-btn" onClick={handleNewChat}>
+            New chat
+          </button>
+
+          <div className="sidebar-title">Conversations</div>
+          <div className="session-list">
+            {loadingSessions ? (
+              <div className="session-card">Loading sessions...</div>
+            ) : sessions.length === 0 ? (
+              <div className="session-card">No sessions yet.</div>
+            ) : (
+              sessions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`session-card ${s.id === sessionId ? "active" : ""}`}
+                  onClick={() => handleSelectSession(s.id)}
+                >
+                  <div>{s.title ?? s.id}</div>
+                  <div className="session-meta">{s.id}</div>
+                </button>
+              ))
+            )}
+          </div>
+
+          <button className="ghost-btn" onClick={handleLogout}>
+            Logout
+          </button>
+        </aside>
+
+        <section className="chat-main">
+          <div className="chat-header">
+            <select
+              value={sessionId}
+              onChange={(e) => handleSelectSession(e.target.value)}
+              disabled={loadingSessions || sessions.length === 0}
+              className="session-select"
+            >
+              <option value="" disabled>
+                {loadingSessions ? "Loading sessions..." : "Select a session"}
+              </option>
+              {sessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title ?? s.id}
+                </option>
+              ))}
+            </select>
+            <div className="status-chip">
+              <span className="status-dot" />
+              Secure workspace
+            </div>
+          </div>
+
+          {errorText ? <div className="error-banner">{errorText}</div> : null}
+
+          <div className="chat-body">
+            <div className="chat-scroll" ref={chatScrollRef}>
+              {loadingHistory ? <div>Loading history...</div> : null}
+
+              {!loadingHistory && !sessionId ? (
+                <div className="empty-state">
+                  No session selected. Create a new chat or pick one from the
+                  list.
+                </div>
+              ) : null}
+
+              {log.map((m, i) => (
+                <div
+                  key={i}
+                  className={`message ${m.role === "user" ? "user" : ""} ${
+                    m.role === "assistant" ? "assistant" : ""
+                  } ${m.role === "system" ? "system" : ""}`}
+                >
+                  <div className="message-role">{m.role}</div>
+                  <div>{m.content}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="composer">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              placeholder={
+                sessionId ? "Type a message..." : "Select a session first..."
+              }
+              disabled={!sessionId || sending}
+              rows={3}
+            />
+            <button
+              className="send-btn"
+              onClick={handleSendClick}
+              disabled={!canSend}
+            >
+              {sending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );
+
 }
